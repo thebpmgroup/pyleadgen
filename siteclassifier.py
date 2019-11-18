@@ -7,6 +7,8 @@ from six.moves.urllib.parse import urlparse
 from fake_useragent import UserAgent
 from bs4 import BeautifulSoup
 from time import sleep
+import nltk
+import spacy
 
 ua = UserAgent()
 email_regex = r"([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)"
@@ -24,6 +26,8 @@ blacklist = [
     'style'
 	# there may be more elements you don't want, such as "style", etc.
 ]
+
+nlp = spacy.load("en_core_web_sm")
 
 class SiteClassifier:
     def __init__(self,url):
@@ -43,6 +47,9 @@ class SiteClassifier:
         self.about = ''
         self.aboutlink=''
         self.emails = []
+        self.text = ''
+        self.doc = None
+        self.ent_labels = None
 
     def gohome(self):
         try:
@@ -80,10 +87,15 @@ class SiteClassifier:
             aboutlink = (min(aboutlinks, key=len))
             self.aboutlink = aboutlink
             r = requests.get(aboutlink,{"User-Agent": ua.random})
+            if len(r.text)==0:
+                return
             soup = BeautifulSoup(r.text, 'html.parser')
-            self.about = soup.find('p').getText()
+            pagetext = soup.findAll(text=True)
+            for textitem in pagetext:
+                print(textitem)
+                self.about += textitem
         except Exception as e:
-            print("siteclassifier.readallaboutit" + str(e))
+            print("siteclassifier.readallaboutit " + str(e))
         return
 
     def findcompanyregno(self):
@@ -129,3 +141,34 @@ class SiteClassifier:
             if soup:
                 soup.decompose()
         return
+
+    def url_to_string(self, url):
+        res = requests.get(url,{"User-Agent": ua.random})
+        html = res.text
+        soup = BeautifulSoup(html, 'html5lib')
+        for script in soup(["script", "style", 'aside']):
+            script.extract()
+        return " ".join(re.split(r'[\n\t]+', soup.get_text()))
+
+    def striptext(self):
+        soup = None
+        #f=open("pagetext", "a+")
+        try:
+            output = ''
+            for l in self.sitelinks:
+                output += '{} '.format(self.url_to_string(l))
+        #        f.write(output + "\r\n")
+        #        output = ""
+            self.text = output
+        except Exception as e:
+            print("siteclassifier.entityextraction : " + str(e))
+        finally:
+            if soup:
+                soup.decompose()
+        return
+
+    def entityextraction(self):
+        if len(self.text)==0:
+            self.striptext()
+        self.doc = nlp(self.text)
+        self.ent_labels = [x.label_ for x in self.doc.ents]
